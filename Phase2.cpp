@@ -1,14 +1,21 @@
-#include <bits/stdc++.h>
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cstring>
+#include <ctime>
+
 using namespace std;
 
 char M[300][4];
-char IR[4], R[4];
+char R[4], IR[4];
 int IC;
 bool C;
 int SI, PI, TI;
-int PTR;
-int TTC, LLC;
-int TTL, TLL;
+
+struct PCB
+{
+    int jobId, TTL, TLL, TTC, LLC, PTR;
+} pcb;
 
 ifstream fin;
 ofstream fout;
@@ -17,16 +24,11 @@ vector<int> usedFrames;
 int currentPage = 0;
 bool terminated = false;
 
-// ====================== INIT ======================
 void init()
 {
     for (int i = 0; i < 300; i++)
-    {
         for (int j = 0; j < 4; j++)
-        {
             M[i][j] = ' ';
-        }
-    }
 
     for (int i = 0; i < 4; i++)
     {
@@ -37,32 +39,53 @@ void init()
     IC = 0;
     C = false;
     SI = PI = TI = 0;
-    TTC = LLC = 0;
+    pcb.TTC = pcb.LLC = pcb.PTR = 0;
     currentPage = 0;
     terminated = false;
     usedFrames.clear();
 }
 
-// ====================== ALLOCATE FRAME ======================
+void dumpMemory()
+{
+    cout << "\n=== MEMORY DUMP (JOB " << pcb.jobId << ") ===\n";
+    for (int i = 0; i < 300; i++)
+    {
+        cout << "M[" << i << "]: ";
+        for (int j = 0; j < 4; j++)
+        {
+            char c = M[i][j];
+            cout << (c == ' ' ? '_' : c);
+        }
+        cout << "\n";
+    }
+    cout << "=========================\n\n";
+}
+
 int allocateFrame()
 {
-    if (usedFrames.size() >= 30)
-    {
-        terminate(6); // No more frames
-        exit(1);
-    }
+    if ((int)usedFrames.size() >= 30)
+        return -1;
+
     while (true)
     {
-        int f = rand() % 30;
-        if (find(usedFrames.begin(), usedFrames.end(), f) == usedFrames.end())
+        int frame = rand() % 30;
+        bool used = false;
+        for (int f : usedFrames)
         {
-            usedFrames.push_back(f);
-            return f;
+            if (f == frame)
+            {
+                used = true;
+                break;
+            }
+        }
+        if (!used)
+        {
+            usedFrames.push_back(frame);
+            return frame;
         }
     }
 }
 
-// ====================== ADDRESS MAP ======================
 int addressMap(int VA)
 {
     if (VA < 0 || VA > 99)
@@ -71,260 +94,317 @@ int addressMap(int VA)
         return -1;
     }
     int page = VA / 10;
-    int PTE = PTR + page;
+    int offset = VA % 10;
+    int PTE = pcb.PTR + page;
 
-    if (M[PTE][0] == '*' || !isdigit(M[PTE][2]) || !isdigit(M[PTE][3]))
+    if (M[PTE][0] == '*')
     {
         PI = 3;
         return -1;
     }
+
     int frame = (M[PTE][2] - '0') * 10 + (M[PTE][3] - '0');
-    return frame * 10 + (VA % 10);
+    return frame * 10 + offset;
 }
 
-// ====================== TERMINATE ======================
 void terminate(int EM)
 {
-    fout << "\n\n";
     switch (EM)
     {
     case 0:
-        fout << "NO ERROR\n";
+        fout << "NO ERROR";
         break;
     case 1:
-        fout << "OUT OF DATA\n";
+        fout << "OUT OF DATA";
         break;
     case 2:
-        fout << "LINE LIMIT EXCEEDED\n";
+        fout << "LINE LIMIT EXCEEDED";
         break;
     case 3:
-        fout << "TIME LIMIT EXCEEDED\n";
+        fout << "TIME LIMIT EXCEEDED";
         break;
     case 4:
-        fout << "OPERATION CODE ERROR\n";
+        fout << "OPCODE ERROR";
         break;
     case 5:
-        fout << "OPERAND ERROR\n";
+        fout << "OPERAND ERROR";
         break;
     case 6:
-        fout << "INVALID PAGE FAULT\n";
+        fout << "INVALID PAGE FAULT";
         break;
     }
+    fout << "\n-------------------------------------------\n";
+    fout << "JOB ID           : " << pcb.jobId << "\n";
+    fout << "IC               : " << IC << "\n";
+    fout << "IR               : " << IR[0] << IR[1] << IR[2] << IR[3] << "\n";
+    fout << "TIME USED  (TTC) : " << pcb.TTC << "\n";
+    fout << "LINES USED (LLC) : " << pcb.LLC << "\n";
+    fout << "-------------------------------------------\n\n\n";
+
+    dumpMemory();
     terminated = true;
 }
 
-// ====================== MASTER MODE ======================
+bool handlePageFault(int VA)
+{
+    int page = VA / 10;
+    int frame = allocateFrame();
+    if (frame == -1)
+        return false;
+
+    int pte = pcb.PTR + page;
+    M[pte][0] = ' ';
+    M[pte][1] = ' ';
+    M[pte][2] = (frame / 10) + '0';
+    M[pte][3] = (frame % 10) + '0';
+
+    PI = 0;
+    return true;
+}
+
 void MOS()
 {
-    if (terminated)
-        return;
+    if (PI != 0)
+    {
+        if (PI == 1)
+        {
+            terminate(4);
+        }
+        else if (PI == 2)
+        {
+            terminate(5);
+        }
+        else if (PI == 3)
+        {
+            string op = "";
+            op += IR[0];
+            op += IR[1];
 
-    // TI has highest priority
+            if (op == "GD" || op == "SR")
+            {
+                int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
+                if (!handlePageFault(VA))
+                    terminate(6);
+            }
+            else
+            {
+                terminate(6);
+            }
+        }
+        return;
+    }
+
     if (TI == 2)
     {
         if (SI == 2)
-        { // Allow last PD
-            LLC++;
-            if (LLC <= TLL)
+        {
+            int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
+            if (++pcb.LLC <= pcb.TLL)
             {
-                int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
                 int RA = addressMap(VA);
-                if (PI == 0)
+                if (PI == 0 && RA != -1)
                 {
-                    for (int i = RA; i < RA + 10; i++)
-                        for (int j = 0; j < 4; j++)
+                    for (int i = RA; i < RA + 10; ++i)
+                        for (int j = 0; j < 4; ++j)
                             fout << M[i][j];
                     fout << "\n";
                 }
+                PI = 0;
             }
+            SI = 0;
         }
         terminate(3);
         return;
     }
 
-    // PI Handling
-    if (PI != 0)
+    if (SI != 0)
     {
-        if (PI == 3)
+        int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
+
+        if (SI == 1)
         {
-            if ((IR[0] == 'G' && IR[1] == 'D') || (IR[0] == 'S' && IR[1] == 'R'))
+            string line;
+            if (!getline(fin, line) || (line.size() >= 4 && line.substr(0, 4) == "$END"))
             {
-                int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
-                int page = VA / 10;
-                int frame = allocateFrame();
-                M[PTR + page][0] = '0';
-                M[PTR + page][1] = '0';
-                M[PTR + page][2] = (frame / 10) + '0';
-                M[PTR + page][3] = (frame % 10) + '0';
-                PI = 0;
-                return;
+                terminate(1);
             }
             else
             {
-                terminate(6);
-                return;
+                int RA = addressMap(VA);
+
+                if (PI == 3)
+                {
+                    handlePageFault(VA);
+                    RA = addressMap(VA);
+                }
+
+                if (!terminated && PI == 0 && RA != -1)
+                {
+                    int k = 0;
+                    for (int i = RA; i < RA + 10; ++i)
+                        for (int j = 0; j < 4; ++j)
+                            M[i][j] = (k < (int)line.size()) ? line[k++] : ' ';
+                }
             }
         }
-        else if (PI == 1)
-            terminate(4);
-        else if (PI == 2)
-            terminate(5);
-        return;
-    }
-
-    // SI Handling
-    if (SI == 1)
-    { // GD
-        string line;
-        if (!getline(fin, line) || line.substr(0, 4) == "$END")
+        else if (SI == 2)
         {
-            terminate(1);
-            return;
-        }
-        int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
-        int RA = addressMap(VA);
-        if (PI != 0)
-            return;
+            if (++pcb.LLC > pcb.TLL)
+            {
+                terminate(2);
+            }
+            else
+            {
+                int RA = addressMap(VA);
 
-        int k = 0;
-        for (int i = RA; i < RA + 10; i++)
-            for (int j = 0; j < 4; j++)
-                M[i][j] = (k < (int)line.length()) ? line[k++] : ' ';
-        SI = 0;
-    }
-    else if (SI == 2)
-    { // PD
-        LLC++;
-        if (LLC > TLL)
+                if (PI == 3)
+                {
+                    terminate(6);
+                    return;
+                }
+
+                if (!terminated && PI == 0 && RA != -1)
+                {
+                    for (int i = RA; i < RA + 10; ++i)
+                        for (int j = 0; j < 4; ++j)
+                            fout << M[i][j];
+                    fout << "\n";
+                }
+            }
+        }
+        else if (SI == 3)
         {
-            terminate(2);
-            return;
+            terminate(0);
         }
-        int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
-        int RA = addressMap(VA);
-        if (PI != 0)
-            return;
 
-        for (int i = RA; i < RA + 10; i++)
-            for (int j = 0; j < 4; j++)
-                fout << M[i][j];
-        fout << "\n";
         SI = 0;
-    }
-    else if (SI == 3)
-    {
-        terminate(0);
     }
 }
 
-// ====================== EXECUTE ======================
-void executeUserProgram()
+void executeJob()
 {
     while (!terminated)
     {
-        if (TTC >= TTL)
+        int RA = addressMap(IC);
+
+        if (PI == 3)
         {
-            TI = 2;
+            handlePageFault(IC);
+            continue;
+        }
+        if (PI != 0)
+        {
             MOS();
             continue;
         }
 
-        int RA = addressMap(IC);
-        if (PI != 0)
-        {
-            MOS();
-            if (PI == 0)
-            { // Page fault resolved
-                IC--;
-                continue;
-            }
-            return;
-        }
-
         memcpy(IR, M[RA], 4);
-        IC++;
+
+        if (IR[0] == 'H')
+        {
+            pcb.TTC += 1;
+
+            if (pcb.TTC > pcb.TTL)
+                TI = 2;
+
+            SI = 3;
+            MOS();
+            break;
+        }
 
         if (!isdigit(IR[2]) || !isdigit(IR[3]))
         {
             PI = 2;
             MOS();
-            return;
+
+            if (!terminated)
+                IC++;
+
+            continue;
         }
 
-        string op(IR, IR + 2);
+        string op = "";
+        op += IR[0];
+        op += IR[1];
+
+        if (op == "GD" || op == "SR")
+            pcb.TTC += 2;
+        else
+            pcb.TTC += 1;
+
+        if (pcb.TTC > pcb.TTL)
+            TI = 2;
+
+        int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
+        bool branchTaken = false;
 
         if (op == "GD")
         {
             SI = 1;
-            MOS();
         }
         else if (op == "PD")
         {
             SI = 2;
-            MOS();
         }
-        else if (op == "LR")
+        else if (op == "LR" || op == "SR" || op == "CR")
         {
-            int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
             int loc = addressMap(VA);
+
+            if (PI == 3)
+            {
+                if (op == "SR")
+                {
+                    handlePageFault(VA);
+                    if (!terminated)
+                    {
+                        pcb.TTC -= 2;
+                        continue;
+                    }
+                }
+                else
+                {
+                    terminate(6);
+                    break;
+                }
+            }
+
             if (PI != 0)
             {
                 MOS();
+                if (!terminated)
+                    IC++;
                 continue;
             }
-            memcpy(R, M[loc], 4);
+
+            if (op == "LR")
+                memcpy(R, M[loc], 4);
+            else if (op == "SR")
+                memcpy(M[loc], R, 4);
+            else
+                C = (memcmp(R, M[loc], 4) == 0);
         }
-        else if (op == "SR")
-        {
-            int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
-            int loc = addressMap(VA);
-            if (PI != 0)
-            {
-                MOS();
-                continue;
-            }
-            memcpy(M[loc], R, 4);
-        }
-        else if (op == "CR")
-        {
-            int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
-            int loc = addressMap(VA);
-            if (PI != 0)
-            {
-                MOS();
-                continue;
-            }
-            C = (memcmp(R, M[loc], 4) == 0);
-        }
+
         else if (op == "BT")
         {
-            int VA = (IR[2] - '0') * 10 + (IR[3] - '0');
             if (C)
             {
-                int oldPI = PI;
-                int test = addressMap(VA);
-                if (PI == 0)
-                    IC = VA;
-                PI = oldPI; // Restore PI
+                IC = VA;
+                branchTaken = true;
             }
-        }
-        else if (IR[0] == 'H')
-        {
-            SI = 3;
-            MOS();
-            return;
         }
         else
         {
             PI = 1;
-            MOS();
-            return;
         }
-        TTC++;
+
+        if (SI != 0 || PI != 0 || TI != 0)
+            MOS();
+
+        if (!branchTaken && !terminated && PI == 0)
+            IC++;
     }
 }
 
-// ====================== LOAD ======================
 void load()
 {
     string line;
@@ -336,43 +416,42 @@ void load()
         if (line.substr(0, 4) == "$AMJ")
         {
             init();
-            TTL = stoi(line.substr(8, 4));
-            TLL = stoi(line.substr(12, 4));
-            PTR = allocateFrame() * 10;
-            for (int i = PTR; i < PTR + 10; i++)
-                M[i][0] = M[i][1] = M[i][2] = M[i][3] = '*';
+            pcb.jobId = stoi(line.substr(4, 4));
+            pcb.TTL = stoi(line.substr(8, 4));
+            pcb.TLL = stoi(line.substr(12, 4));
+            pcb.PTR = allocateFrame() * 10;
+
+            for (int i = 0; i < 10; i++)
+                for (int j = 0; j < 4; j++)
+                    M[pcb.PTR + i][j] = '*';
+
+            currentPage = 0;
         }
+
         else if (line.substr(0, 4) == "$DTA")
         {
-            executeUserProgram();
+            executeJob();
         }
         else if (line.substr(0, 4) == "$END")
         {
             continue;
         }
+
         else
         {
-            if (currentPage >= 10)
-            {
-                terminate(6);
-                break;
-            }
             int frame = allocateFrame();
             int page = currentPage++;
+            int pte = pcb.PTR + page;
 
-            M[PTR + page][0] = '0';
-            M[PTR + page][1] = '0';
-            M[PTR + page][2] = (frame / 10) + '0';
-            M[PTR + page][3] = (frame % 10) + '0';
+            M[pte][0] = ' ';
+            M[pte][1] = ' ';
+            M[pte][2] = (frame / 10) + '0';
+            M[pte][3] = (frame % 10) + '0';
 
             int k = 0;
             for (int i = frame * 10; i < frame * 10 + 10; i++)
-            {
                 for (int j = 0; j < 4; j++)
-                {
-                    M[i][j] = (k < (int)line.length()) ? line[k++] : ' ';
-                }
-            }
+                    M[i][j] = (k < (int)line.size()) ? line[k++] : ' ';
         }
     }
 }
@@ -380,17 +459,14 @@ void load()
 int main()
 {
     srand(time(0));
-    fin.open("input.txt");
-    fout.open("output.txt");
-
+    fin.open("input2.txt");
+    fout.open("output2.txt");
     if (!fin.is_open())
     {
-        cout << "Error opening input.txt\n";
+        cout << "Error opening input2.txt\n";
         return 1;
     }
-
     load();
-
     fin.close();
     fout.close();
     cout << "MOS Execution Completed!\n";
